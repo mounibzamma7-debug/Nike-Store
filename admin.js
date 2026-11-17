@@ -1,6 +1,81 @@
 
 document.addEventListener("DOMContentLoaded", () => {
 
+
+
+    // =========================================
+    // ADMIN AUTHENTICATION - SUPABASE
+    // =========================================
+
+    const loginForm = document.getElementById("adminLoginForm");
+    const loginError = document.getElementById("loginError");
+    const loginButton = document.getElementById("loginButton");
+
+    function setAuthenticated(isAuthenticated) {
+        document.body.classList.toggle("authenticated", isAuthenticated);
+    }
+
+    // Check existing login session
+    async function checkAdminSession() {
+        const { data, error } = await window.supabaseClient.auth.getSession();
+
+        if (error) {
+            console.error("Session error:", error.message);
+            setAuthenticated(false);
+            return;
+        }
+
+        setAuthenticated(!!data.session);
+    }
+
+    // Login
+    loginForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        loginError.textContent = "";
+        loginButton.disabled = true;
+        loginButton.textContent = "SIGNING IN...";
+
+        const email = document.getElementById("adminEmail").value.trim();
+        const password = document.getElementById("adminPassword").value;
+
+        const { data, error } =
+            await window.supabaseClient.auth.signInWithPassword({
+                email,
+                password
+            });
+
+        if (error) {
+            loginError.textContent = "Invalid email or password.";
+            console.error("Login error:", error.message);
+            setAuthenticated(false);
+        } else {
+            setAuthenticated(!!data.session);
+            loginForm.reset();
+        }
+
+        loginButton.disabled = false;
+        loginButton.textContent = "SIGN IN";
+    });
+
+    // Logout / session changes
+    window.supabaseClient.auth.onAuthStateChange((event, session) => {
+        setAuthenticated(!!session);
+    });
+
+    checkAdminSession();
+    // Logout
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+    const { error } = await window.supabaseClient.auth.signOut();
+
+    if (error) {
+        alert("Logout failed: " + error.message);
+        return;
+    }
+
+    setAuthenticated(false);
+});
+
     // =========================================
     // 1. STORAGE & HELPERS
     // =========================================
@@ -52,8 +127,11 @@ document.addEventListener("DOMContentLoaded", () => {
     ];
 
     let orders = readOrders();
-    let products = readProducts();
+let products = readProducts();
 
+// Supabase products
+let productsLoaded = false;
+let productsLoading = false;
 
     // =========================================
     // 2. INITIAL PRODUCTS
@@ -145,6 +223,76 @@ document.addEventListener("DOMContentLoaded", () => {
     migrateProductStock();
 
 
+    // =========================================
+// 4. LOAD PRODUCTS FROM SUPABASE
+// =========================================
+
+async function loadProductsFromSupabase() {
+
+    if (productsLoading) return;
+
+    productsLoading = true;
+
+    try {
+
+        // Get products from Supabase
+        let { data, error } = await window.supabaseClient
+            .from("products")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            throw error;
+        }
+
+        // If Supabase is empty, migrate old local products
+        if (data.length === 0) {
+
+            const oldProducts = readProducts();
+
+            if (oldProducts.length > 0) {
+
+                const { error: insertError } =
+                    await window.supabaseClient
+                        .from("products")
+                        .insert(oldProducts);
+
+                if (insertError) {
+                    throw insertError;
+                }
+
+                // Load migrated products
+                const result = await window.supabaseClient
+                    .from("products")
+                    .select("*")
+                    .order("created_at", { ascending: false });
+
+                if (result.error) {
+                    throw result.error;
+                }
+
+                data = result.data;
+            }
+        }
+
+        products = data || [];
+        productsLoaded = true;
+
+        refresh();
+
+        console.log("Products loaded from Supabase:", products);
+
+    } catch (error) {
+
+        console.error("Supabase products error:", error.message);
+
+        alert("Could not load products from Supabase: " + error.message);
+
+    } finally {
+
+        productsLoading = false;
+    }
+}
     // =========================================
     // 4. NAVIGATION
     // =========================================
@@ -259,48 +407,17 @@ document.addEventListener("DOMContentLoaded", () => {
     // 6. REFRESH
     // =========================================
 
-    function refresh() {
+function refresh() {
 
-        orders = readOrders();
-        products = readProducts();
+    orders = readOrders();
 
-        // Normalize stock quantities
-        let stockChanged = false;
+    renderDashboard();
+    renderOrders();
+    renderCustomers();
+    renderProducts();
 
-        products = products.map(product => {
-
-            const rawStock = product.stock;
-
-            const stock = (
-                rawStock === undefined ||
-                rawStock === null ||
-                rawStock === ""
-            )
-                ? 10
-                : Math.max(0, Math.floor(Number(rawStock) || 0));
-
-            if (stock !== rawStock) {
-                stockChanged = true;
-            }
-
-            return {
-                ...product,
-                stock
-            };
-        });
-
-        if (stockChanged) {
-            saveProducts(products);
-        }
-
-        renderDashboard();
-        renderOrders();
-        renderCustomers();
-        renderProducts();
-
-        document.getElementById("ordersBadge").textContent = orders.length;
-    }
-
+    document.getElementById("ordersBadge").textContent = orders.length;
+}
 
     // =========================================
     // 7. DASHBOARD
@@ -1003,144 +1120,182 @@ document.addEventListener("DOMContentLoaded", () => {
     // 14. SAVE PRODUCT
     // =========================================
 
-    productForm.addEventListener("submit", event => {
+    
+productForm.addEventListener("submit", async event => {
 
-        event.preventDefault();
+    event.preventDefault();
 
-        const id = document.getElementById("productId").value;
-        const name = document.getElementById("productName").value.trim();
-        const price = Number(document.getElementById("productPrice").value);
+    const id = document.getElementById("productId").value;
+    const name = document.getElementById("productName").value.trim();
+    const price = Number(document.getElementById("productPrice").value);
+    const category = document.getElementById("productCategory").value.trim();
 
-        const category = document.getElementById("productCategory").value.trim();
+    const stockInput = document.getElementById("productStock").value;
+    const stock = Number(stockInput);
 
-        const stockInput = document.getElementById("productStock").value;
-        const stock = Number(stockInput);
+    const description =
+        document.getElementById("productDescription").value.trim();
 
-        const description =
-            document.getElementById("productDescription").value.trim();
+    const sizes = document.getElementById("productSizes").value
+        .split(",")
+        .map(size => size.trim())
+        .filter(Boolean);
 
-        const sizes = document.getElementById("productSizes").value
-            .split(",")
-            .map(size => size.trim())
-            .filter(Boolean);
+    const colors = [];
 
-        const colors = [];
+    colorsContainer.querySelectorAll(".color-form-row").forEach(row => {
 
-        colorsContainer.querySelectorAll(".color-form-row").forEach(row => {
+        const colorName =
+            row.querySelector(".color-name-input").value.trim();
 
-            const colorName =
-                row.querySelector(".color-name-input").value.trim();
+        const colorImage =
+            row.querySelector(".color-image-input").value.trim();
 
-            const colorImage =
-                row.querySelector(".color-image-input").value.trim();
-
-            if (colorName && colorImage) {
-                colors.push({
-                    name: colorName,
-                    image: colorImage
-                });
-            }
-        });
-
-        if (!name || !Number.isFinite(price) || price < 0) {
-            alert("Please enter a valid product name and price.");
-            return;
+        if (colorName && colorImage) {
+            colors.push({
+                name: colorName,
+                image: colorImage
+            });
         }
+    });
 
-        if (
-            stockInput.trim() === "" ||
-            !Number.isInteger(stock) ||
-            stock < 0
-        ) {
-            alert("Please enter a valid stock quantity (0 or a positive whole number).");
-            return;
-        }
+    if (!name || !Number.isFinite(price) || price < 0) {
+        alert("Please enter a valid product name and price.");
+        return;
+    }
 
-        if (!colors.length) {
-            alert("Please add at least one color with its image.");
-            return;
-        }
+    if (
+        stockInput.trim() === "" ||
+        !Number.isInteger(stock) ||
+        stock < 0
+    ) {
+        alert("Please enter a valid stock quantity.");
+        return;
+    }
 
-        if (!sizes.length) {
-            alert("Please add at least one size.");
-            return;
-        }
+    if (!colors.length || !sizes.length) {
+        alert("Please add at least one color and one size.");
+        return;
+    }
 
-        const productData = {
-            id: id || `product-${Date.now()}`,
-            name,
-            price,
-            category: category || "NIKE SPORTSWEAR",
-            description,
-            stock,
-            sizes,
-            colors
-        };
+    const productData = {
+        id: id || `product-${Date.now()}`,
+        name,
+        price,
+        category: category || "NIKE SPORTSWEAR",
+        description,
+        stock,
+        sizes,
+        colors
+    };
+
+    const saveButton = document.getElementById("saveProductBtn");
+
+    saveButton.disabled = true;
+
+    try {
+
+        let result;
 
         if (id) {
 
-            const index = products.findIndex(product => product.id === id);
-
-            if (index !== -1) {
-                products[index] = productData;
-            } else {
-                alert("Product not found.");
-                return;
-            }
+            result = await window.supabaseClient
+                .from("products")
+                .update(productData)
+                .eq("id", id);
 
         } else {
 
-            products.push(productData);
+            result = await window.supabaseClient
+                .from("products")
+                .insert([productData]);
+
         }
 
-        saveProducts(products);
-        refresh();
+        if (result.error) {
+            throw result.error;
+        }
+
+        await loadProductsFromSupabase();
+
         closeProductModal();
 
-        alert(id ? "Product updated successfully!" : "Product added successfully!");
-    });
+        alert(id
+            ? "Product updated successfully!"
+            : "Product added successfully!"
+        );
 
+    } catch (error) {
+
+        console.error("Product save error:", error);
+
+        alert("Could not save product: " + error.message);
+
+    } finally {
+
+        saveButton.disabled = false;
+    }
+});
 
     // =========================================
     // 15. EDIT / DELETE PRODUCT
     // =========================================
 
-    document.getElementById("productsGrid").addEventListener("click", event => {
+// =========================================
+// 15. EDIT / DELETE PRODUCT
+// =========================================
 
-        const editButton = event.target.closest("[data-edit-product]");
-        const deleteButton = event.target.closest("[data-delete-product]");
+document.getElementById("productsGrid").addEventListener("click", async event => {
 
-        if (editButton) {
+    const editButton = event.target.closest("[data-edit-product]");
+    const deleteButton = event.target.closest("[data-delete-product]");
 
-            const product = products.find(
-                item => item.id === editButton.dataset.editProduct
-            );
+    if (editButton) {
 
-            if (product) openProductModal(product);
-        }
+        const product = products.find(
+            item => item.id === editButton.dataset.editProduct
+        );
 
-        if (deleteButton) {
+        if (product) openProductModal(product);
+    }
 
-            const productId = deleteButton.dataset.deleteProduct;
+    if (deleteButton) {
 
-            const product = products.find(item => item.id === productId);
+        const productId = deleteButton.dataset.deleteProduct;
 
-            if (!product) return;
+        const product = products.find(item => item.id === productId);
 
-            const confirmed = confirm(
-                `Are you sure you want to delete "${product.name}"?`
-            );
+        if (!product) return;
 
-            if (!confirmed) return;
+        const confirmed = confirm(
+            `Are you sure you want to delete "${product.name}"?`
+        );
 
-            products = products.filter(item => item.id !== productId);
+        if (!confirmed) return;
 
-            saveProducts(products);
-            refresh();
+        try {
+
+            const { error } = await window.supabaseClient
+                .from("products")
+                .delete()
+                .eq("id", productId);
+
+            if (error) {
+                throw error;
+            }
+
+            await loadProductsFromSupabase();
 
             alert("Product deleted successfully!");
+
+        } catch (error) {
+
+            console.error("Product delete error:", error);
+
+            alert("Could not delete product: " + error.message);
         }
-    });
+    }
+});
 
 
     // =========================================
@@ -1507,8 +1662,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // 20. INITIALIZE
     // =========================================
 
-    navigate(location.hash.replace("#", "") || "dashboard");
+   navigate(location.hash.replace("#", "") || "dashboard");
 
-    refresh();
+refresh();
 
+checkAdminSession().then(() => {
+    loadProductsFromSupabase();
+});
 });

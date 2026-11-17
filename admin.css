@@ -1397,3 +1397,33 @@ td strong { color: #222; }
         font-size: 20px;
     }
 }
+/* Logout Button */
+.sidebar-bottom {
+    padding: 20px;
+    border-top: 1px solid #eeeeee;
+}
+
+.sidebar-bottom .logout-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 13px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: #e53935;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sidebar-bottom .logout-btn:hover {
+    background: #fff0ef;
+}
+
+.sidebar-bottom .logout-btn i {
+    font-size: 16px;
+}

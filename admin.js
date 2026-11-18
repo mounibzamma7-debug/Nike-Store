@@ -426,23 +426,30 @@ const ordersChannel = window.supabaseClient
     }
 async function updateOrderStatus(orderId, newStatus) {
 
-    if (!STATUSES.includes(newStatus)) return;
+    if (!STATUSES.includes(newStatus)) return false;
 
-    const { error } = await window.supabaseClient
-        .from("orders")
-        .update({ status: newStatus })
-        .eq("id", orderId);
+    try {
 
-    if (error) {
+        const { error } = await window.supabaseClient
+            .from("orders")
+            .update({ status: newStatus })
+            .eq("id", orderId);
+
+        if (error) throw error;
+
+        await loadOrdersFromSupabase();
+
+        return true;
+
+    } catch (error) {
+
         console.error("Supabase update order error:", error);
+
         alert("Could not update order: " + error.message);
-        return;
+
+        return false;
     }
-
-    await loadOrdersFromSupabase();
 }
-
-
     // =========================================
     // 6. REFRESH
     // =========================================
@@ -509,8 +516,8 @@ function refresh() {
                 <tr>
                     <td class="order-id">${safe(order.id)}</td>
                     <td>${safe(customerName(order))}</td>
-                    <td>${dateText(order.date)}</td>
-                    <td>${money(order.total)}</td>
+               <td>${dateText(order.date || order.created_at)}</td>               
+               <td>${money(order.total)}</td>
                     <td>
                         <span class="status ${statusClass(order.status)}">
                             ${safe(order.status || "New")}
@@ -571,8 +578,7 @@ function refresh() {
 
                 if (order.status === "Cancelled") return;
 
-                const orderDate = new Date(order.date);
-
+const orderDate = new Date(order.date || order.created_at);
                 if (
                     Number.isNaN(orderDate.getTime()) ||
                     orderDate.getFullYear() !== currentYear
@@ -1631,11 +1637,13 @@ document.getElementById("productsGrid").addEventListener("click", async event =>
             </div>
         `;
 
-   document.getElementById("modalStatus").addEventListener("change", async event => {
+document.getElementById("modalStatus").addEventListener("change", async event => {
 
-    await updateOrderStatus(orderId, event.target.value);
+    const success = await updateOrderStatus(orderId, event.target.value);
 
-    openOrder(orderId);
+    if (success) {
+        openOrder(orderId);
+    }
 });
         modal.classList.add("open");
     }
@@ -1760,12 +1768,7 @@ document.getElementById("productsGrid").addEventListener("click", async event =>
         }
     });
 
-    setInterval(() => {
-        if (!document.hidden) {
-            refresh();
-        }
-    }, 2000);
-
+  
 
     // =========================================
     // 19. KEYBOARD

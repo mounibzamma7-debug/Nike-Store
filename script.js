@@ -143,6 +143,9 @@ console.log("Supabase products count:", data?.length);
 
         products = Array.isArray(data) ? data : [];
 
+   
+
+
         renderProducts();
 
         console.log("Store products loaded from Supabase:", products);
@@ -1166,11 +1169,11 @@ console.log("SUBMIT ORDER FUNCTION STARTED");
         payment: "Cash on Delivery",
         status: "New"
     };
-    console.log("CHECK 1: submitOrder started");
-console.log("CHECK 2: Cart items:", cart);
-console.log("CHECK 3: Sending order to Supabase...");
+   
 // Save order and update stock in Supabase
-const { error } = await window.supabaseClient
+
+
+const { data: savedOrder, error } = await window.supabaseClient
     .rpc("place_order", {
         p_order: order
     });
@@ -1180,6 +1183,20 @@ if (error) {
     alert("Could not place your order: " + error.message);
     return;
 }
+
+// Use the real totals calculated by Supabase
+order.subtotal = Number(savedOrder.subtotal);
+order.delivery = Number(savedOrder.delivery);
+order.total = Number(savedOrder.total);
+
+
+if (error) {
+    console.error("Supabase order error:", error);
+    alert("Could not place your order: " + error.message);
+    return;
+}
+
+
 
     // Reload latest products and stock from Supabase
 await loadProductsFromSupabase();

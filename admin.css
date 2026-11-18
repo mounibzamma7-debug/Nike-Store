@@ -1427,3 +1427,34 @@ td strong { color: #222; }
 .sidebar-bottom .logout-btn i {
     font-size: 16px;
 }
+
+/* Delete All Orders Button */
+
+.orders-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.delete-all-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 18px;
+    background: #fff0ef;
+    color: #d93025;
+    border: 1px solid #ffd5d2;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .2s ease;
+}
+
+.delete-all-btn:hover {
+    background: #d93025;
+    color: #fff;
+}

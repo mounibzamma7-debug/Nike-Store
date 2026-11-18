@@ -303,7 +303,10 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th>Order ID</th>
+                                    <th>
+    <input type="checkbox" id="selectAllOrders">
+</th>
+<th>Order ID</th>
                                     <th>Customer</th>
                                     <th>Date</th>
                                     <th>Total</th>
@@ -351,10 +354,19 @@
                     <p>View and manage customer orders.</p>
                 </div>
 
-                <button id="exportOrders" class="secondary-btn">
-                    <i class="fa-solid fa-download"></i>
-                    Export CSV
-                </button>
+                <div class="orders-actions">
+
+    <button id="exportOrders" class="secondary-btn">
+        <i class="fa-solid fa-download"></i>
+        Export CSV
+    </button>
+
+    <button id="deleteSelectedOrders" class="delete-all-btn">
+    <i class="fa-solid fa-trash"></i>
+    Delete Selected
+</button>
+
+</div>
 
             </div>
 

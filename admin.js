@@ -15,18 +15,24 @@ document.addEventListener("DOMContentLoaded", () => {
         document.body.classList.toggle("authenticated", isAuthenticated);
     }
 
-    // Check existing login session
-    async function checkAdminSession() {
-        const { data, error } = await window.supabaseClient.auth.getSession();
+   async function checkAdminSession() {
 
-        if (error) {
-            console.error("Session error:", error.message);
-            setAuthenticated(false);
-            return;
-        }
+    const { data, error } = await window.supabaseClient.auth.getSession();
 
-        setAuthenticated(!!data.session);
+    if (error) {
+        console.error("Session error:", error.message);
+        setAuthenticated(false);
+        return false;
     }
+
+    const adminUID = "3cc499fb-be9d-4d84-a682-ab3871ed3028";
+
+    const isAdmin = data.session?.user?.id === adminUID;
+
+    setAuthenticated(isAdmin);
+
+    return isAdmin;
+}
 
     // Login
     loginForm.addEventListener("submit", async event => {
@@ -80,14 +86,7 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
     // 1. STORAGE & HELPERS
     // =========================================
 
-    const readOrders = () => {
-        try {
-            const data = JSON.parse(localStorage.getItem("nikeOrders"));
-            return Array.isArray(data) ? data : [];
-        } catch {
-            return [];
-        }
-    };
+  
 
     const readProducts = () => {
         try {
@@ -102,9 +101,7 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
         localStorage.setItem("nikeProducts", JSON.stringify(products));
     };
 
-    const saveOrders = orders => {
-        localStorage.setItem("nikeOrders", JSON.stringify(orders));
-    };
+   
 
     const money = value =>
         `${Number(value || 0).toLocaleString("en-US")} TND`;
@@ -126,7 +123,7 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
         "Cancelled"
     ];
 
-    let orders = readOrders();
+   let orders = [];
 let products = readProducts();
 
 // Supabase products
@@ -293,6 +290,49 @@ async function loadProductsFromSupabase() {
         productsLoading = false;
     }
 }
+async function loadOrdersFromSupabase() {
+
+    const { data, error } = await window.supabaseClient
+        .from("orders")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        console.error("Supabase orders error:", error);
+        alert("Could not load orders: " + error.message);
+        return;
+    }
+
+
+    orders = data || [];
+    refresh();
+}
+
+// =========================================
+// REALTIME - ORDERS UPDATES
+// =========================================
+
+const ordersChannel = window.supabaseClient
+    .channel("admin-orders-updates")
+    .on(
+        "postgres_changes",
+        {
+            event: "*",
+            schema: "public",
+            table: "orders"
+        },
+        async () => {
+            console.log("Orders changed in Supabase. Reloading...");
+            await loadOrdersFromSupabase();
+        }
+    )
+    .subscribe((status, error) => {
+    console.log("Orders Realtime status:", status);
+
+    if (error) {
+        console.error("Orders Realtime error:", error);
+    }
+});
     // =========================================
     // 4. NAVIGATION
     // =========================================
@@ -384,23 +424,23 @@ async function loadProductsFromSupabase() {
             0
         );
     }
+async function updateOrderStatus(orderId, newStatus) {
 
-    function updateOrderStatus(orderId, newStatus) {
+    if (!STATUSES.includes(newStatus)) return;
 
-        if (!STATUSES.includes(newStatus)) return;
+    const { error } = await window.supabaseClient
+        .from("orders")
+        .update({ status: newStatus })
+        .eq("id", orderId);
 
-        const storedOrders = readOrders();
-
-        const order = storedOrders.find(item => item.id === orderId);
-
-        if (!order) return;
-
-        order.status = newStatus;
-
-        saveOrders(storedOrders);
-
-        refresh();
+    if (error) {
+        console.error("Supabase update order error:", error);
+        alert("Could not update order: " + error.message);
+        return;
     }
+
+    await loadOrdersFromSupabase();
+}
 
 
     // =========================================
@@ -409,7 +449,7 @@ async function loadProductsFromSupabase() {
 
 function refresh() {
 
-    orders = readOrders();
+  
 
     renderDashboard();
     renderOrders();
@@ -679,8 +719,18 @@ function refresh() {
                 const currentStatus = order.status || "New";
 
                 return `
+                    
                     <tr>
-                        <td class="order-id">${safe(order.id)}</td>
+    <td>
+        <input
+            type="checkbox"
+            class="order-checkbox"
+            value="${safe(order.id)}"
+            aria-label="Select order"
+        >
+    </td>
+
+    <td class="order-id">${safe(order.id)}</td>
                         <td>${safe(customerName(order))}</td>
                         <td>${dateText(order.date)}</td>
                         <td>${itemCount(order)}</td>
@@ -717,6 +767,81 @@ function refresh() {
             filtered.length === 0
         );
     }
+    // Select all visible orders
+document.getElementById("selectAllOrders").addEventListener("change", event => {
+
+    document.querySelectorAll("#ordersTable .order-checkbox").forEach(checkbox => {
+        checkbox.checked = event.target.checked;
+    });
+
+});
+
+// Update Select All state
+document.getElementById("ordersTable").addEventListener("change", event => {
+
+    if (!event.target.classList.contains("order-checkbox")) return;
+
+    const checkboxes = [
+        ...document.querySelectorAll("#ordersTable .order-checkbox")
+    ];
+
+    const checkedCount = checkboxes.filter(cb => cb.checked).length;
+
+    const selectAll = document.getElementById("selectAllOrders");
+
+    selectAll.checked = checkboxes.length > 0 &&
+        checkedCount === checkboxes.length;
+
+    selectAll.indeterminate =
+        checkedCount > 0 && checkedCount < checkboxes.length;
+
+});
+
+// Delete selected orders
+document.getElementById("deleteSelectedOrders").addEventListener("click", async () => {
+
+    const selectedIds = [
+        ...document.querySelectorAll("#ordersTable .order-checkbox:checked")
+    ].map(checkbox => checkbox.value);
+
+    if (selectedIds.length === 0) {
+        alert("Please select at least one order.");
+        return;
+    }
+
+    if (!confirm(`Delete ${selectedIds.length} selected order(s)?`)) return;
+
+    const { error } = await window.supabaseClient
+        .from("orders")
+        .delete()
+        .in("id", selectedIds);
+
+    if (error) {
+        alert("Could not delete orders: " + error.message);
+        return;
+    }
+
+    document.getElementById("selectAllOrders").checked = false;
+    document.getElementById("selectAllOrders").indeterminate = false;
+
+    await loadOrdersFromSupabase();
+
+    alert("Selected orders deleted successfully.");
+});
+
+
+// Update order status
+document.getElementById("ordersTable").addEventListener("change", event => {
+
+    const select = event.target.closest("[data-order-status]");
+
+    if (!select) return;
+
+    updateOrderStatus(
+        select.dataset.orderStatus,
+        select.value
+    );
+});
 
     document.getElementById("ordersTable").addEventListener("change", event => {
 
@@ -866,11 +991,12 @@ function refresh() {
         const searchInput = document.getElementById("productSearch");
         const categorySelect = document.getElementById("categoryFilter");
 
-        const query = searchInput.value.trim().toLowerCase();
-        const selectedCategory = categorySelect.value;
+   const query = searchInput.value.trim().toLowerCase();
 
-        renderProductStats();
-        renderCategoryFilter();
+renderProductStats();
+renderCategoryFilter();
+
+const selectedCategory = categorySelect.value;
 
         const filteredProducts = products.filter(product => {
 
@@ -1505,13 +1631,12 @@ document.getElementById("productsGrid").addEventListener("click", async event =>
             </div>
         `;
 
-        document.getElementById("modalStatus").addEventListener("change", event => {
+   document.getElementById("modalStatus").addEventListener("change", async event => {
 
-            updateOrderStatus(orderId, event.target.value);
+    await updateOrderStatus(orderId, event.target.value);
 
-            openOrder(orderId);
-        });
-
+    openOrder(orderId);
+});
         modal.classList.add("open");
     }
 
@@ -1622,12 +1747,9 @@ document.getElementById("productsGrid").addEventListener("click", async event =>
 
     window.addEventListener("storage", event => {
 
-        if (
-            event.key === "nikeOrders" ||
-            event.key === "nikeProducts"
-        ) {
-            refresh();
-        }
+     if (event.key === "nikeProducts") {
+    refresh();
+}
     });
 
     window.addEventListener("focus", refresh);
@@ -1666,7 +1788,12 @@ document.getElementById("productsGrid").addEventListener("click", async event =>
 
 refresh();
 
-checkAdminSession().then(() => {
+checkAdminSession().then(isAdmin => {
+
+    if (!isAdmin) return;
+
     loadProductsFromSupabase();
+    loadOrdersFromSupabase();
+
 });
 });

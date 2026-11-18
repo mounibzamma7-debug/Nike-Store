@@ -121,7 +121,58 @@ document.addEventListener("DOMContentLoaded", () => {
 
     migrateStock();
 
+    // =========================================
+// LOAD PRODUCTS FROM SUPABASE
+// =========================================
+async function loadProductsFromSupabase() {
 
+
+    try {
+
+        const { data, error } = await window.supabaseClient
+            .from("products")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+            console.log("Supabase raw products:", data);
+console.log("Supabase products count:", data?.length);
+
+        if (error) {
+            throw error;
+        }
+
+        products = Array.isArray(data) ? data : [];
+
+        renderProducts();
+
+        console.log("Store products loaded from Supabase:", products);
+
+    } catch (error) {
+
+        console.error("Supabase store products error:", error);
+
+        alert("Could not load products: " + error.message);
+    }
+}
+// =========================================
+// REALTIME PRODUCT UPDATES
+// =========================================
+
+const productsChannel = window.supabaseClient
+    .channel("store-products-updates")
+    .on(
+        "postgres_changes",
+        {
+            event: "*",
+            schema: "public",
+            table: "products"
+        },
+        async () => {
+            console.log("Products changed in Supabase. Reloading...");
+            await loadProductsFromSupabase();
+        }
+    )
+    .subscribe();
     // =========================================
     // 3. PRODUCT DISPLAY + SEARCH
     // =========================================
@@ -169,10 +220,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         oldSections.forEach(section => section.remove());
-
-        products = readStorage(PRODUCTS_KEY);
-
-        if (!Array.isArray(products)) products = [];
 
         // SEARCH FILTER
         const filteredProducts = products.filter(product => {
@@ -699,7 +746,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function addToCart(productId, section) {
 
-        products = readStorage(PRODUCTS_KEY);
+       
 
         const product = getProduct(productId);
 
@@ -931,16 +978,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function validateCartStock() {
 
-        products = readStorage(PRODUCTS_KEY);
-
-        if (!Array.isArray(products)) products = [];
+       
 
         const quantities = new Map();
+if (cart.some(item =>
+    !Number.isInteger(Number(item.quantity)) ||
+    Number(item.quantity) <= 0
+)) {
+    alert("Invalid product quantity in your bag.");
+    return false;
+}
 
-        cart.forEach(item => {
+       cart.forEach(item => {
 
-            const id = String(item.productId || "");
-            if (!id) return;
+    const id = String(item.productId || "");
+    const quantity = Number(item.quantity);
+
+    if (!id || !Number.isInteger(quantity) || quantity <= 0) {
+        return;
+    }
 
             quantities.set(
                 id,
@@ -1043,123 +1099,101 @@ document.addEventListener("DOMContentLoaded", () => {
     // 17. PLACE ORDER
     // =========================================
 
-    function submitOrder(event) {
+    
+async function submitOrder(event) {
+console.log("SUBMIT ORDER FUNCTION STARTED");
+    event.preventDefault();
 
-        event.preventDefault();
-
-        if (!cart.length) {
-            alert("Your shopping bag is empty.");
-            closeCheckout();
-            return;
-        }
-
-        if (!validateCartStock()) return;
-
-        const customer = {
-            name: document.getElementById("customerName")?.value.trim() || "",
-            email: document.getElementById("customerEmail")?.value.trim() || "",
-            phone: document.getElementById("customerPhone")?.value.trim() || "",
-            city: document.getElementById("customerCity")?.value.trim() || "",
-            address: document.getElementById("customerAddress")?.value.trim() || "",
-            postal: document.getElementById("customerPostal")?.value.trim() || ""
-        };
-
-        if (Object.values(customer).some(value => !value)) {
-            alert("Please complete all delivery information.");
-            return;
-        }
-
-        const paymentInput = document.querySelector(
-            'input[name="payment"]:checked'
-        );
-
-        const payment = paymentInput?.value || "Cash on Delivery";
-
-        if (payment === "Bank Card") {
-            alert(
-                "Card payment is not available yet. Please select Cash on Delivery."
-            );
-            return;
-        }
-
-        products = readStorage(PRODUCTS_KEY);
-
-        if (!Array.isArray(products) || !validateCartStock()) return;
-
-        const subtotal = cartSubtotal();
-        const total = subtotal + DELIVERY_FEE;
-
-        const orderItems = cart.map(item => ({
-            productId: item.productId,
-            name: item.name,
-            image: item.image,
-            color: item.color,
-            size: item.size,
-            price: Number(item.price),
-            quantity: Number(item.quantity)
-        }));
-
-        const orders = readStorage(ORDERS_KEY);
-
-        if (!Array.isArray(orders)) {
-            alert("Could not save the order. Please try again.");
-            return;
-        }
-
-        const order = {
-            id: "NK-" + Date.now(),
-            date: new Date().toISOString(),
-            customer,
-            items: orderItems,
-            subtotal,
-            delivery: DELIVERY_FEE,
-            total,
-            payment: "Cash on Delivery",
-            status: "New"
-        };
-
-        orders.unshift(order);
-        saveStorage(ORDERS_KEY, orders);
-
-        const quantities = new Map();
-
-        orderItems.forEach(item => {
-
-            const id = String(item.productId);
-
-            quantities.set(
-                id,
-                (quantities.get(id) || 0) + item.quantity
-            );
-        });
-
-        products = products.map(product => {
-
-            const quantity = quantities.get(String(product.id)) || 0;
-
-            if (!quantity) return product;
-
-            return {
-                ...product,
-                stock: Math.max(
-                    0,
-                    Number(product.stock || 0) - quantity
-                )
-            };
-        });
-
-        saveStorage(PRODUCTS_KEY, products);
-
-        cart = [];
-
-        saveCart();
-        renderCart();
-        renderProducts();
-
+    if (!cart.length) {
+        alert("Your shopping bag is empty.");
         closeCheckout();
-
-        renderOrderSuccess(order);
+        return;
     }
+
+    if (!validateCartStock()) return;
+
+    const customer = {
+        name: document.getElementById("customerName")?.value.trim() || "",
+        email: document.getElementById("customerEmail")?.value.trim() || "",
+        phone: document.getElementById("customerPhone")?.value.trim() || "",
+        city: document.getElementById("customerCity")?.value.trim() || "",
+        address: document.getElementById("customerAddress")?.value.trim() || "",
+        postal: document.getElementById("customerPostal")?.value.trim() || ""
+    };
+
+    if (Object.values(customer).some(value => !value)) {
+        alert("Please complete all delivery information.");
+        return;
+    }
+
+    const paymentInput = document.querySelector(
+        'input[name="payment"]:checked'
+    );
+
+    const payment = paymentInput?.value || "Cash on Delivery";
+
+    if (payment === "Bank Card") {
+        alert(
+            "Card payment is not available yet. Please select Cash on Delivery."
+        );
+        return;
+    }
+
+
+    if (!Array.isArray(products) || !validateCartStock()) return;
+
+    const subtotal = cartSubtotal();
+    const total = subtotal + DELIVERY_FEE;
+
+    const orderItems = cart.map(item => ({
+        productId: item.productId,
+        name: item.name,
+        image: item.image,
+        color: item.color,
+        size: item.size,
+        price: Number(item.price),
+        quantity: Number(item.quantity)
+    }));
+
+    const order = {
+        id: "NK-" + Date.now(),
+        date: new Date().toISOString(),
+        customer,
+        items: orderItems,
+        subtotal,
+        delivery: DELIVERY_FEE,
+        total,
+        payment: "Cash on Delivery",
+        status: "New"
+    };
+    console.log("CHECK 1: submitOrder started");
+console.log("CHECK 2: Cart items:", cart);
+console.log("CHECK 3: Sending order to Supabase...");
+// Save order and update stock in Supabase
+const { error } = await window.supabaseClient
+    .rpc("place_order", {
+        p_order: order
+    });
+
+if (error) {
+    console.error("Supabase order error:", error);
+    alert("Could not place your order: " + error.message);
+    return;
+}
+
+    // Reload latest products and stock from Supabase
+await loadProductsFromSupabase();
+
+    cart = [];
+
+    saveCart();
+    renderCart();
+    renderProducts();
+
+    closeCheckout();
+
+    renderOrderSuccess(order);
+}
 
     checkoutForm?.addEventListener("submit", submitOrder);
 
@@ -1232,5 +1266,5 @@ document.addEventListener("DOMContentLoaded", () => {
     renderProducts();
     renderCart();
     updateCartCounter();
-
+loadProductsFromSupabase();
 });
